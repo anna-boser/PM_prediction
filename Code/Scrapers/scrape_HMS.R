@@ -5,7 +5,7 @@ library(sf)
 library(dplyr)
 library(lubridate)
 
-date_list <- seq(ymd('2017-01-01'), ymd('2018-12-31'), by = '1 day')
+date_list <- seq(ymd('2017-01-01'), ymd('2017-12-31'), by = '1 day')
 
 for (i in 1:length(date_list)) {
   date <- date_list[i]
