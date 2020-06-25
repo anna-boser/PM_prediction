@@ -3,6 +3,11 @@
 #SW: 36.8,-123.5
 #NE: 39,-120.8
 
+# in terminal: 
+# cd ~/Documents/GitHub/PM_prediction/Code/Scrapers
+# chmod 777 MAIAC_scraper.sh
+# ./MAIAC_scraper.sh
+
 
 #!/bin/sh
 
