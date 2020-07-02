@@ -122,7 +122,7 @@ if __name__ == '__main__':
         forecasts = [0]
     
         # Specify a Save Directory
-        SAVEDIR = '../../Data/HRRR/'
+        SAVEDIR = r'C:/Users/aboser/Documents/GitHub/PM_prediction/Data/HRRR/'
         
         # -------------------------------------------------------------------------
     
