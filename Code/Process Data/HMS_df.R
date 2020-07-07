@@ -110,8 +110,9 @@ ggplot(Plumes) + geom_histogram(aes(x = DATE, fill = is.na(Density)), bins = 100
 #We're kinda fucked lol. There only starts to be densities consistently starting in 2010. I'll do the analysis on the Plumes without densities too then. 
 
 # In reality what I did: 
-load("~/PM_exposure-4:6:2020.RData")
+load("~/PM_exposure03:29:2020.RData")
 Plumes <- filter(Plumes, year(DATE) == 2017)
 DataDir <- "~/Documents/GitHub/PM_prediction/"
-st_write(Plumes, dsn = file.path(DataDir, "Data/HMS/Plumes.shp"), layer = "Plumes")
+st_write(Plumes, dsn = file.path(DataDir, "Data/HMS/Plumes.shp"), layer = "Plumes") #for some reason this doesn't keep denisty
+saveRDS(Plumes, file = file.path(DataDir, "Data/HMS/Plumes.RData"))
 
