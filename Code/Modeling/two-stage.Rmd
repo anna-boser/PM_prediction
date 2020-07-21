@@ -1,0 +1,371 @@
+---
+title: "two-stage"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE)
+```
+
+## Two-stage model creation and testing narrative
+
+I load in my data and set the Day as a factor. 
+```{r}
+library(cvTools)
+library(dplyr)
+library(tidyr)
+library(lme4)
+library(spgwr)
+library(leaps)
+
+Data <- read.csv(file = "C:\\Users\\aboser\\Documents\\GitHub\\PM_prediction\\Data\\Final_DFs\\Train.csv")
+
+#make day factor for random effects
+Data$Day <- as.factor(Data$Day)
+```
+
+```{r}
+#make sure time constant values are really constant
+check_time_constant <- function(column){
+  Ids <- unique(Data[,"Id"])
+  Bools <- c()
+  for (i in Ids){
+   Bools <-  c(Bools, length(unique(filter(Data, Id == i)[,column])) == 1)
+  }
+  unique(Bools)
+}
+
+check_time_constant("Elevation")
+check_time_constant("Emissions")
+check_time_constant("Forest")
+check_time_constant("Roads")
+check_time_constant("Streets")
+```
+
+###some data exploration
+
+How are the different parameters correlated? 
+```{r}
+pairs(PM ~ . ,
+      data = cbind("PM" = Data$PM, Data[,5:10]))
+
+pairs(PM ~ . ,
+      data =  cbind("PM" = Data$PM, Data[,11:15]))
+
+pairs(PM ~ . ,
+      data =  cbind("PM" = Data$PM, Data[,16:ncol(Data)]))
+```
+
+Might be easier to see with a correlation matrix: 
+```{r}
+cor(Data[,5:ncol(Data)], use = "complete.obs")
+```
+It's cool to see that the Plumes are looking good :) also AOD looks good. The lags in precipitation don't look like they're doing any good. (I also checked one day after just out of curiosity and that wasn't any good.)
+
+I don't bother to check on normality because it doesn't actually matter if the distributions are normal if I don't care about the error bars. The linear model will maximize for any linear relationship regardless of distribution. However, linearity is important. From the above plots, it looks like doing a log transformation on PM might actially help with prediction. 
+
+```{r}
+Data$log_PM <- log(Data$PM)
+hist(Data$PM)
+hist(Data$log_PM)
+```
+
+It certainly makes PM look more normal
+
+```{r}
+pairs(log_PM ~ . ,
+      data = cbind("log_PM" = Data$log_PM, Data[,5:10]))
+
+pairs(log_PM ~ . ,
+      data =  cbind("log_PM" = Data$log_PM, Data[,11:15]))
+
+pairs(log_PM ~ . ,
+      data =  cbind("log_PM" = Data$log_PM, Data[,16:ncol(Data)]))
+```
+
+
+Before adding the mixed effects, I just fit a linear model without the day specific random effects to see which parameters seem most pertinent. 
+```{r}
+lm_model <- lm(formula = PM ~ Elevation + 
+                                 Emissions + 
+                                 Forest + 
+                                 Roads + 
+                                 Streets +
+                                 Plumes_High + 
+                                 Plumes_Med + 
+                                 Plumes_Low + 
+                                 Max_Temp + 
+                                 Max_Wind +
+                                 Precip + 
+                                 Rel_Humidity + 
+                                 Wind_Dir + 
+                                 BLH + 
+                                 AOD,
+               data = Data)
+summary(lm_model)
+```
+It looks like Roads/streets, precipitation and wind direction seem to be the least important, but these confidence intervals can't be trusted due to correlation between parameters. 
+
+I compare this to a model fitting log(PM)
+```{r}
+lm_model <- lm(formula = log_PM ~ Elevation + 
+                                 Emissions + 
+                                 Forest + 
+                                 Roads + 
+                                 Streets +
+                                 Plumes_High + 
+                                 Plumes_Med + 
+                                 Plumes_Low + 
+                                 Max_Temp + 
+                                 Max_Wind +
+                                 Precip + 
+                                 Rel_Humidity + 
+                                 Wind_Dir + 
+                                 BLH + 
+                                 AOD,
+               data = Data)
+summary(lm_model)
+```
+Weirdly, it's way worse. I go back to just PM. 
+
+###Choosing which variables to include
+
+```{r}
+reg <- leaps::regsubsets(PM ~ Elevation + 
+                                 Emissions + 
+                                 Forest + 
+                                 Roads + 
+                                 Streets +
+                                 Plumes_High + 
+                                 Plumes_Med + 
+                                 Plumes_Low + 
+                                 Max_Temp + 
+                                 Max_Wind +
+                                 Precip + 
+                                 Rel_Humidity + 
+                                 Wind_Dir + 
+                                 BLH + 
+                                 AOD, 
+                         data = Data, 
+                         method = "exhaustive", 
+                         nbest = 10, 
+                         nvmax = 30)
+reg_summary <-  summary(reg)
+
+bestbic <- order(reg_summary$bic, decreasing = FALSE)[1:5]
+
+getvars <- function(id){
+  vars <- names(coef(reg, id))[-1]
+}
+
+lapply(bestbic, getvars)
+```
+
+Using BIC, it looks like the best model leaves out Roads and Streets, Precipitation, and Wind direction. This is mostly consistent with the statistical significance of the coefficients above. 
+
+I begin by creating a mixed effects model. My equation is: 
+$$
+PM_{2.5, st} = (b_0 + b_{0,t}) + (b_1 + b_{1,t})AOD_{st} + (b_2 + b_{2,t})BLH_{st} + \\ 
+(b_3 + b_{3,t})WindDirection_{st} + (b_4 + b_{4,t})RelativeHumidity_{st} + \\
+(b_5 + b_{5,t})Precipitation(Lag)_{st} + (b_6 + b_{6,t})WindSpeed_{st} + \\
+(b_7 + b_{7,t})MaximumTemperature_{st} + (b_8 + b_{8,t})LowPlumes_{st} + \\
+(b_9 + b_{9,t})MediumPlumes_{st} + (b_{10} + b_{10,t})HighPlumes_{st} + \\
+b_{11}Streets_s + b_{12}MajorRoads_s + b_{13}ForestCover_s + \\
+b_{14}Emissions_s + b_{15}Elevation_s + \epsilon_{st}(b_{0,t}b_{1,t}b_{2,t}) \tilde{} N[(0,0,0), \Phi)
+$$
+
+Given that there are many missing AOD and BLH values, I separate the data into data with and without AOD/BLH and train models on both. 
+
+```{r}
+w_AOD <- filter(Data, !is.na(AOD), !is.na(BLH))
+wo_AOD <- filter(Data, is.na(AOD), !is.na(BLH))
+wo_AOD_wo_BLH <- filter(Data, is.na(AOD), is.na(BLH))
+```
+
+```{r}
+#function to get R2 from an LME
+get_r2 <- function(formula, Data){
+  model <- lmer(formula,
+                    data = Data)
+
+  r2 <- 1 - (sum((predict(model) - Data$PM)^2)/sum((Data$PM - mean(Data$PM))^2))
+  return(list("model" = model, "r2" = r2))
+}
+
+```
+
+
+```{r}
+full_formula <-  "PM ~ Elevation + 
+                      Emissions +
+                      Forest +
+                      Roads +
+                      Streets +
+                      Plumes_High +
+                      Plumes_Med +
+                      Plumes_Low +
+                      Max_Temp +
+                      Max_Wind +
+                      Precip +
+                      Rel_Humidity +
+                      Wind_Dir +
+                      BLH +
+                      AOD +
+                      (1 + 
+                         Plumes_High +
+                      Plumes_Med +
+                      Plumes_Low +
+                      Max_Temp +
+                      Max_Wind +
+                      Precip +
+                      Rel_Humidity +
+                      Wind_Dir +
+                      BLH +
+                      AOD| Day)"
+
+# Unadjusted Rs value for lme
+tmp <- get_r2(full_formula, w_AOD)
+full_model <- tmp$model
+tmp$r2
+```
+This is very promising: the full model has an unadjusted R2 of 0.7897612. 
+
+```{r}
+reduced_formula <- "PM ~ Elevation + 
+                      Emissions +
+                      Forest +
+                      Streets +
+                      Plumes_High +
+                      Plumes_Med +
+                      Plumes_Low +
+                      Max_Temp +
+                      Max_Wind +
+                      Rel_Humidity +
+                      BLH +
+                      AOD +
+                      (1 + 
+                         Plumes_High +
+                      Plumes_Med +
+                      Plumes_Low +
+                      Max_Temp +
+                      Max_Wind +
+                      Rel_Humidity +
+                      BLH +
+                      AOD| Day)"
+
+get_r2(reduced_formula, w_AOD)$r2
+```
+
+The reduced model has an unadjusted R2 of 0.7824499. 
+
+```{r}
+reduced_formula_no_AOD <- "PM ~ Elevation + 
+                      Emissions +
+                      Forest +
+                      Streets +
+                      Plumes_High +
+                      Plumes_Med +
+                      Plumes_Low +
+                      Max_Temp +
+                      Max_Wind +
+                      Rel_Humidity +
+                      BLH +
+                      (1 + 
+                         Plumes_High +
+                      Plumes_Med +
+                      Plumes_Low +
+                      Max_Temp +
+                      Max_Wind +
+                      Rel_Humidity +
+                      BLH| Day)"
+
+get_r2(reduced_formula_no_AOD, Data)$r2
+get_r2(reduced_formula_no_AOD, w_AOD)$r2
+get_r2(reduced_formula_no_AOD, wo_AOD)$r2
+```
+Interestingly, the data that has no AOD performs best. 
+
+###Cross validation
+It is important to note that due to missing values sometimes I cannot test on the full test subset. 
+```{r}
+CV <- function(k, Data, formula){
+
+Folds <- cvFolds(length(unique(Data$Id)),k)
+folds <- Folds$which
+names(folds) <- Folds$subsets[,1]
+
+# make folds based on location Id
+stations <- as.character(as.numeric(as.factor(Data$Id)))
+station_folds <- folds[stations]
+
+Es <- list()
+test_PM <- list()
+fold_df <- as.data.frame(matrix(data = NA, nrow = k + 1, ncol = 5))
+names(fold_df) <- c("stations", "MAE", "MSE", "RMSE", "R2")
+
+for(i in unique(station_folds)){
+  
+  train_D <- Data[station_folds != i,]
+  
+  lme_model <- lmer(formula = full_formula, 
+                 data = train_D)
+  
+  test_D <- Data[station_folds == i & Data$Day %in% unique(train_D$Day),]
+  # test_D <- Data[station_folds == i & Data$Day,] #some days are not trained on. 
+  
+  test_predictions <- predict(lme_model, newdata = test_D)
+  
+  test_stations <- unique(test_D$Id)
+  fold_df$stations[i] <- list(test_stations)
+  
+  E <- (test_D$PM - test_predictions)
+  fold_df$MAE[i] <- mean(abs(E))
+  fold_df$MSE[i] <- mean(E^2)
+  fold_df$RMSE[i] <- sqrt(mean(E^2))
+  fold_df$R2[i] <- 1 - ((mean(E^2))/var(test_D$PM))
+  
+  test_PM[[i]] <- test_D$PM
+  Es[[i]] <- E
+  
+  # paste0("Fold ", i," has MSE ", mean(E^2), ". The stations that are in this fold are: station " , test_stations , ".")
+
+}
+fold_df$stations[k+1] <- "All"
+
+fold_df$MAE[k+1] <- mean(abs(unlist(Es)))
+fold_df$MSE[k+1] <- mean(unlist(Es)^2)
+fold_df$RMSE[k+1] <- sqrt(MSE)
+fold_df$R2[k+1] <- 1 - (MSE/var(unlist(test_PM)))
+
+# paste0("CV MSE: ", MSE, ". R2: ", R2, ". RMSE: ", RMSE, ". ME: ", MAE, ".")
+
+return(fold_df)
+}
+
+leave_one_out <- CV(34, w_AOD, full_formula)
+leave_one_out$stations <- leave_one_out$stations %>% unlist()
+write.csv(leave_one_out, file = "C:\\Users\\aboser\\Documents\\GitHub\\PM_prediction\\Data\\Final_DFs\\LME_CV.csv")
+```
+The cross-validation is ok -- a decent start. 
+
+##Time for step two: the GWR!
+```{r}
+#Add a column to your dataset: the residual from the first model
+w_AOD$resid <- predict(full_model) - w_AOD$PM
+data.bw <- gwr.sel(resid ~ AOD, data = w_AOD, coords = cbind(w_AOD$Lon, w_AOD$Lat))
+data.gauss <- gwr(resid ~ AOD, data = w_AOD, coords = cbind(w_AOD$Lon, w_AOD$Lat), bandwidth = data.bw, hatmatrix = TRUE)
+data.gauss
+```
+
+```{r}
+predict(data.gauss)
+w_AOD$final_predictions <- w_AOD$resid + predict(data.gauss)
+tsR2 <- 1 - ((var(w_AOD$final_predictions))/var(w_AOD$PM))
+tsE <- w_AOD$final_predictions - w_AOD$PM
+tsMAE <- mean(abs(tsE))
+tsMSE <- mean((tsE)^2)
+tsRMSE <- sqrt(tsMSE)
+
+paste0("Unadjusted full two-stage model on only instances with AOD. MSE: ", tsMSE, ". R2: ", tsR2, ". RMSE: ", tsRMSE, ". ME: ", tsMAE, ".")
+```
+
