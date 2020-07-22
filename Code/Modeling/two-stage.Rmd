@@ -228,7 +228,7 @@ tmp <- get_r2(full_formula, w_AOD)
 full_model <- tmp$model
 tmp$r2
 ```
-This is very promising: the full model has an unadjusted R2 of 0.7897612. 
+This is very promising: the full model has an unadjusted R2 of 0.7739246. 
 
 ```{r}
 reduced_formula <- "PM ~ Elevation + 
@@ -256,7 +256,7 @@ reduced_formula <- "PM ~ Elevation +
 get_r2(reduced_formula, w_AOD)$r2
 ```
 
-The reduced model has an unadjusted R2 of 0.7824499. 
+The reduced model has an unadjusted R2 of 0.7650429. 
 
 ```{r}
 reduced_formula_no_AOD <- "PM ~ Elevation + 
@@ -300,8 +300,8 @@ station_folds <- folds[stations]
 
 Es <- list()
 test_PM <- list()
-fold_df <- as.data.frame(matrix(data = NA, nrow = k + 1, ncol = 5))
-names(fold_df) <- c("stations", "MAE", "MSE", "RMSE", "R2")
+fold_df <- as.data.frame(matrix(data = NA, nrow = k + 1, ncol = 6))
+names(fold_df) <- c("stations", "MAE", "MSE", "RMSE", "R2", "Bias")
 
 for(i in unique(station_folds)){
   
@@ -319,6 +319,7 @@ for(i in unique(station_folds)){
   fold_df$stations[i] <- list(test_stations)
   
   E <- (test_D$PM - test_predictions)
+  fold_df$Bias[i] <- mean(E)
   fold_df$MAE[i] <- mean(abs(E))
   fold_df$MSE[i] <- mean(E^2)
   fold_df$RMSE[i] <- sqrt(mean(E^2))
@@ -332,19 +333,36 @@ for(i in unique(station_folds)){
 }
 fold_df$stations[k+1] <- "All"
 
+fold_df$Bias[k+1] <- mean(unlist(Es))
 fold_df$MAE[k+1] <- mean(abs(unlist(Es)))
 fold_df$MSE[k+1] <- mean(unlist(Es)^2)
 fold_df$RMSE[k+1] <- sqrt(MSE)
 fold_df$R2[k+1] <- 1 - (MSE/var(unlist(test_PM)))
 
-# paste0("CV MSE: ", MSE, ". R2: ", R2, ". RMSE: ", RMSE, ". ME: ", MAE, ".")
+# paste0("CV MSE: ", MSE, ". R2: ", R2, ". RMSE: ", RMSE, ". MAE: ", MAE, ".")
 
 return(fold_df)
 }
 
+start_time <- Sys.time()
 leave_one_out <- CV(34, w_AOD, full_formula)
 leave_one_out$stations <- leave_one_out$stations %>% unlist()
 write.csv(leave_one_out, file = "C:\\Users\\aboser\\Documents\\GitHub\\PM_prediction\\Data\\Final_DFs\\LME_CV.csv")
+end_time <- Sys.time()
+
+end_time - start_time
+
+leave_one_out
+
+start_time <- Sys.time()
+leave_one_out_red <- CV(34, w_AOD, reduced_formula)
+leave_one_out_red$stations <- leave_one_out_red$stations %>% unlist()
+write.csv(leave_one_out_red, file = "C:\\Users\\aboser\\Documents\\GitHub\\PM_prediction\\Data\\Final_DFs\\LME_CV_red.csv")
+end_time <- Sys.time()
+
+end_time - start_time
+
+leave_one_out_red
 ```
 The cross-validation is ok -- a decent start. 
 
@@ -366,6 +384,6 @@ tsMAE <- mean(abs(tsE))
 tsMSE <- mean((tsE)^2)
 tsRMSE <- sqrt(tsMSE)
 
-paste0("Unadjusted full two-stage model on only instances with AOD. MSE: ", tsMSE, ". R2: ", tsR2, ". RMSE: ", tsRMSE, ". ME: ", tsMAE, ".")
+paste0("Unadjusted full two-stage model on only instances with AOD. MSE: ", tsMSE, ". R2: ", tsR2, ". RMSE: ", tsRMSE, ". MAE: ", tsMAE, ".")
 ```
 

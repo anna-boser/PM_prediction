@@ -106,7 +106,7 @@ precip_lag <- function(row, lag){
 boundary_layer <- read.table("C:\\Users\\aboser\\Documents\\GitHub\\PM_prediction\\Data\\Variables\\Boundary_Layer\\B_layer.txt", header = TRUE, sep = ",")
 boundary_layer <- pivot_longer(boundary_layer, 5:363, names_to = "Day", values_to = "BLH")
 boundary_layer$Date <- as.Date(substr(boundary_layer$Day, 8, 15), format = "%Y%m%d")
-boundary_layer$Day <- strftime(boundary_layer$Date, format = "%j")
+boundary_layer$Day <- as.integer(strftime(boundary_layer$Date, format = "%j"))
 boundary_layer$Unique <- paste0(boundary_layer$FISHNET_LABELS, "_", boundary_layer$Day)
 boundary_layer <- select(boundary_layer, c("Unique", "BLH"))
 
@@ -117,7 +117,7 @@ All_AOD <- list.files(path = "C:\\Users\\aboser\\Documents\\GitHub\\PM_predictio
 Read_AOD <- function(filename){
   tmp <- read.table(paste0("C:\\Users\\aboser\\Documents\\GitHub\\PM_prediction\\Data\\Variables\\AOD\\", filename), header = FALSE, sep = " ")
   tmp <- data.frame("Id" = tmp$V4, "AOD" = tmp$V5)
-  tmp$Day <- substr(filename, 17, 19)
+  tmp$Day <- as.integer(substr(filename, 17, 19))
   tmp$Unique <- paste0(tmp$Id, "_", tmp$Day)
   tmp <- select(tmp, c("Unique", "AOD"))
   tmp
@@ -147,8 +147,8 @@ rm(pm)
 
 Daily_df$PM[Daily_df$PM <= 0] <- NA
 
-write.csv(Daily_df, file = "C:\\Users\\aboser\\Documents\\GitHub\\PM_prediction\\Data\\Final_DFs\\Full.csv")
+write.csv(Daily_df, file = "C:\\Users\\aboser\\Documents\\GitHub\\PM_prediction\\Data\\Final_DFs\\Full.csv", row.names = FALSE)
 
-filter(Daily_df, Day <= 333) %>% write.csv(file = "C:\\Users\\aboser\\Documents\\GitHub\\PM_prediction\\Data\\Final_DFs\\With_AOD.csv")
+filter(Daily_df, Day <= 333) %>% write.csv(file = "C:\\Users\\aboser\\Documents\\GitHub\\PM_prediction\\Data\\Final_DFs\\With_AOD.csv", row.names = FALSE)
 
-filter(Daily_df, Day <= 333 & !is.na(PM)) %>% write.csv(file = "C:\\Users\\aboser\\Documents\\GitHub\\PM_prediction\\Data\\Final_DFs\\Train.csv")
+filter(Daily_df, Day <= 333 & !is.na(PM)) %>% write.csv(file = "C:\\Users\\aboser\\Documents\\GitHub\\PM_prediction\\Data\\Final_DFs\\Train.csv", row.names = FALSE)
