@@ -88,20 +88,20 @@ Daily_df$Rel_Humidity[Daily_df$Rel_Humidity < 0] <- NA
 Daily_df$Wind_Dir[Daily_df$Wind_Dir < 0] <- NA
 
 #add a time lagged precipitation because precipitation probably affects PM2.5 like two days after
-precip_lag <- function(row, lag){
-  location <- as.integer(row["Id"])
-  day <- as.integer(row["Day"])
-  fil <- filter(Data, Id == location, Day == day - lag)
-  if (nrow(fil) == 0){
-    val = NA
-  } else {
-    val = fil$Precip
-  }
-  val
-}
-
-# Daily_df$Precip_lag_1 <- apply(Data, 1, precip_lag, lag = 1) # I looked at these and they're even more useless for predicting PM than just Precipitation. 
-# Daily_df$Precip_lag_2 <- apply(Data, 1, precip_lag, lag = 2)
+# precip_lag <- function(row, lag){
+#   location <- as.integer(row["Id"])
+#   day <- as.integer(row["Day"])
+#   fil <- filter(Daily_df, Id == location, Day == day - lag)
+#   if (nrow(fil) == 0){
+#     val = NA
+#   } else {
+#     val = fil$Precip
+#   }
+#   val
+# }
+# 
+# Daily_df$Precip_lag_1 <- apply(Daily_df, 1, precip_lag, lag = 1) # I looked at these and they're even more useless for predicting PM than just Precipitation. 
+# Daily_df$Precip_lag_2 <- apply(Daily_df, 1, precip_lag, lag = 2)
 
 boundary_layer <- read.table("C:\\Users\\aboser\\Documents\\GitHub\\PM_prediction\\Data\\Variables\\Boundary_Layer\\B_layer.txt", header = TRUE, sep = ",")
 boundary_layer <- pivot_longer(boundary_layer, 5:363, names_to = "Day", values_to = "BLH")
@@ -152,3 +152,14 @@ write.csv(Daily_df, file = "C:\\Users\\aboser\\Documents\\GitHub\\PM_prediction\
 filter(Daily_df, Day <= 333) %>% write.csv(file = "C:\\Users\\aboser\\Documents\\GitHub\\PM_prediction\\Data\\Final_DFs\\With_AOD.csv", row.names = FALSE)
 
 filter(Daily_df, Day <= 333 & !is.na(PM)) %>% write.csv(file = "C:\\Users\\aboser\\Documents\\GitHub\\PM_prediction\\Data\\Final_DFs\\Train.csv", row.names = FALSE)
+
+
+## I also create a frame that only has the cells from the smaller area. 
+Daily_df <- read.csv("C:\\Users\\aboser\\Documents\\GitHub\\PM_prediction\\Data\\Final_DFs\\With_AOD.csv")
+reduced_Ids <- st_read("C:\\Users\\aboser\\Documents\\GitHub\\PM_prediction\\Data\\fishnet\\small_grid.shp")
+reduced_Ids <- reduced_Ids$Id
+Small_Grid <- filter(Daily_df, Id %in% reduced_Ids)
+
+Small_Grid <- filter(Small_Grid, !is.na(Max_Wind), !is.na(Max_Temp), !is.na(Precip), !is.na(BLH))
+
+write.csv(Small_Grid, file = "C:\\Users\\aboser\\Documents\\GitHub\\PM_prediction\\Data\\Final_DFs\\Small_Grid.csv", row.names = FALSE)

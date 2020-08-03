@@ -5,26 +5,28 @@ output: html_document
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE, warning = FALSE)
-```
 
-## Two-stage model creation and testing narrative
-
-I load in my data and set the Day as a factor. 
-```{r}
 library(cvTools)
 library(dplyr)
 library(tidyr)
 library(lme4)
 library(spgwr)
 library(leaps)
+library(sp)
+library(GWmodel)
+```
 
+## Two-stage model creation and testing narrative
+
+I load in my data and set the Day as a factor. 
+```{r load_data}
 Data <- read.csv(file = "C:\\Users\\aboser\\Documents\\GitHub\\PM_prediction\\Data\\Final_DFs\\Train.csv")
 
 #make day factor for random effects
 Data$Day <- as.factor(Data$Day)
 ```
 
-```{r}
+```{r check_constant_time}
 #make sure time constant values are really constant
 check_time_constant <- function(column){
   Ids <- unique(Data[,"Id"])
@@ -45,7 +47,7 @@ check_time_constant("Streets")
 ###some data exploration
 
 How are the different parameters correlated? 
-```{r}
+```{r scatter_plots}
 pairs(PM ~ . ,
       data = cbind("PM" = Data$PM, Data[,5:10]))
 
@@ -57,14 +59,14 @@ pairs(PM ~ . ,
 ```
 
 Might be easier to see with a correlation matrix: 
-```{r}
+```{r correlation_matrix}
 cor(Data[,5:ncol(Data)], use = "complete.obs")
 ```
 It's cool to see that the Plumes are looking good :) also AOD looks good. The lags in precipitation don't look like they're doing any good. (I also checked one day after just out of curiosity and that wasn't any good.)
 
 I don't bother to check on normality because it doesn't actually matter if the distributions are normal if I don't care about the error bars. The linear model will maximize for any linear relationship regardless of distribution. However, linearity is important. From the above plots, it looks like doing a log transformation on PM might actially help with prediction. 
 
-```{r}
+```{r histograms}
 Data$log_PM <- log(Data$PM)
 hist(Data$PM)
 hist(Data$log_PM)
@@ -72,7 +74,7 @@ hist(Data$log_PM)
 
 It certainly makes PM look more normal
 
-```{r}
+```{r log_scatterplots}
 pairs(log_PM ~ . ,
       data = cbind("log_PM" = Data$log_PM, Data[,5:10]))
 
@@ -85,7 +87,7 @@ pairs(log_PM ~ . ,
 
 
 Before adding the mixed effects, I just fit a linear model without the day specific random effects to see which parameters seem most pertinent. 
-```{r}
+```{r linear_model}
 lm_model <- lm(formula = PM ~ Elevation + 
                                  Emissions + 
                                  Forest + 
@@ -107,7 +109,7 @@ summary(lm_model)
 It looks like Roads/streets, precipitation and wind direction seem to be the least important, but these confidence intervals can't be trusted due to correlation between parameters. 
 
 I compare this to a model fitting log(PM)
-```{r}
+```{r log_linear_model}
 lm_model <- lm(formula = log_PM ~ Elevation + 
                                  Emissions + 
                                  Forest + 
@@ -130,7 +132,7 @@ Weirdly, it's way worse. I go back to just PM.
 
 ###Choosing which variables to include
 
-```{r}
+```{r bic_analysis}
 reg <- leaps::regsubsets(PM ~ Elevation + 
                                  Emissions + 
                                  Forest + 
@@ -163,6 +165,7 @@ lapply(bestbic, getvars)
 
 Using BIC, it looks like the best model leaves out Roads and Streets, Precipitation, and Wind direction. This is mostly consistent with the statistical significance of the coefficients above. 
 
+
 I begin by creating a mixed effects model. My equation is: 
 $$
 PM_{2.5, st} = (b_0 + b_{0,t}) + (b_1 + b_{1,t})AOD_{st} + (b_2 + b_{2,t})BLH_{st} + \\ 
@@ -176,13 +179,12 @@ $$
 
 Given that there are many missing AOD and BLH values, I separate the data into data with and without AOD/BLH and train models on both. 
 
-```{r}
+```{r filter_data}
 w_AOD <- filter(Data, !is.na(AOD), !is.na(BLH))
 wo_AOD <- filter(Data, is.na(AOD), !is.na(BLH))
-wo_AOD_wo_BLH <- filter(Data, is.na(AOD), is.na(BLH))
 ```
 
-```{r}
+```{r R2_function}
 #function to get R2 from an LME
 get_r2 <- function(formula, Data){
   model <- lmer(formula,
@@ -195,7 +197,7 @@ get_r2 <- function(formula, Data){
 ```
 
 
-```{r}
+```{r full_LME}
 full_formula <-  "PM ~ Elevation + 
                       Emissions +
                       Forest +
@@ -230,7 +232,7 @@ tmp$r2
 ```
 This is very promising: the full model has an unadjusted R2 of 0.7739246. 
 
-```{r}
+```{r reduced_LME}
 reduced_formula <- "PM ~ Elevation + 
                       Emissions +
                       Forest +
@@ -258,8 +260,41 @@ get_r2(reduced_formula, w_AOD)$r2
 
 The reduced model has an unadjusted R2 of 0.7650429. 
 
-```{r}
-reduced_formula_no_AOD <- "PM ~ Elevation + 
+Looking at the wo_AOD data (same thing as above): 
+```{r full_LME_no_AOD}
+full_formula_wo_AOD <-  "PM ~ Elevation + 
+                      Emissions +
+                      Forest +
+                      Roads +
+                      Streets +
+                      Plumes_High +
+                      Plumes_Med +
+                      Plumes_Low +
+                      Max_Temp +
+                      Max_Wind +
+                      Precip +
+                      Rel_Humidity +
+                      Wind_Dir +
+                      BLH +
+                      (1 + 
+                         Plumes_High +
+                      Plumes_Med +
+                      Plumes_Low +
+                      Max_Temp +
+                      Max_Wind +
+                      Precip +
+                      Rel_Humidity +
+                      Wind_Dir +
+                      BLH| Day)"
+
+# Unadjusted Rs value for lme
+tmp <- get_r2(full_formula_wo_AOD, wo_AOD)
+full_model_wo_AOD <- tmp$model
+tmp$r2
+```
+
+```{r reduced_LME_no_AOD}
+reduced_formula_wo_AOD <- "PM ~ Elevation + 
                       Emissions +
                       Forest +
                       Streets +
@@ -279,15 +314,35 @@ reduced_formula_no_AOD <- "PM ~ Elevation +
                       Rel_Humidity +
                       BLH| Day)"
 
-get_r2(reduced_formula_no_AOD, Data)$r2
-get_r2(reduced_formula_no_AOD, w_AOD)$r2
-get_r2(reduced_formula_no_AOD, wo_AOD)$r2
+get_r2(reduced_formula_wo_AOD, wo_AOD)$r2
+```
+
+Comparing the fit of the LME that does not include AOD on the whole dataset, only data that was missing AOD, and data that included AOD. 
+```{r reduced_LME_no_AOD}
+get_r2(reduced_formula_wo_AOD, filter(Data, !is.na(BLH)))$r2
+get_r2(reduced_formula_wo_AOD, w_AOD)$r2
+get_r2(reduced_formula_wo_AOD, wo_AOD)$r2
 ```
 Interestingly, the data that has no AOD performs best. 
 
-###Cross validation
+### Cross validation
 It is important to note that due to missing values sometimes I cannot test on the full test subset. 
-```{r}
+```{r CV_LME}
+R2 <- function(prediction, true){
+  (sum(
+    (prediction - mean(prediction))
+    *(true - mean(true))
+    )/
+      (sqrt(
+        sum(
+          (prediction - mean(prediction)
+          )^2))*
+         sqrt(
+           sum(
+             ((true - mean(true))^2)))
+       ))^2
+}
+
 CV <- function(k, Data, formula){
 
 Folds <- cvFolds(length(unique(Data$Id)),k)
@@ -300,14 +355,15 @@ station_folds <- folds[stations]
 
 Es <- list()
 test_PM <- list()
-fold_df <- as.data.frame(matrix(data = NA, nrow = k + 1, ncol = 6))
-names(fold_df) <- c("stations", "MAE", "MSE", "RMSE", "R2", "Bias")
+tp <- list()
+fold_df <- as.data.frame(matrix(data = NA, nrow = k + 1, ncol = 7))
+names(fold_df) <- c("stations", "MAE", "MSE", "RMSE", "NSE", "Bias", "R2")
 
 for(i in unique(station_folds)){
   
   train_D <- Data[station_folds != i,]
   
-  lme_model <- lmer(formula = full_formula, 
+  lme_model <- lmer(formula = formula, 
                  data = train_D)
   
   test_D <- Data[station_folds == i & Data$Day %in% unique(train_D$Day),]
@@ -323,10 +379,12 @@ for(i in unique(station_folds)){
   fold_df$MAE[i] <- mean(abs(E))
   fold_df$MSE[i] <- mean(E^2)
   fold_df$RMSE[i] <- sqrt(mean(E^2))
-  fold_df$R2[i] <- 1 - ((mean(E^2))/var(test_D$PM))
+  fold_df$NSE[i] <- 1 - ((mean(E^2))/var(test_D$PM))
+  fold_df$R2[i] <- R2(test_predictions, test_D$PM)
   
   test_PM[[i]] <- test_D$PM
   Es[[i]] <- E
+  tp[[i]] <- test_predictions
   
   # paste0("Fold ", i," has MSE ", mean(E^2), ". The stations that are in this fold are: station " , test_stations , ".")
 
@@ -336,18 +394,22 @@ fold_df$stations[k+1] <- "All"
 fold_df$Bias[k+1] <- mean(unlist(Es))
 fold_df$MAE[k+1] <- mean(abs(unlist(Es)))
 fold_df$MSE[k+1] <- mean(unlist(Es)^2)
-fold_df$RMSE[k+1] <- sqrt(MSE)
-fold_df$R2[k+1] <- 1 - (MSE/var(unlist(test_PM)))
+fold_df$RMSE[k+1] <- sqrt(mean(unlist(Es)^2))
+fold_df$NSE[k+1] <- 1 - (mean(unlist(Es)^2)/var(unlist(test_PM)))
+fold_df$R2[k+1] <- R2(unlist(tp), unlist(test_PM))
 
 # paste0("CV MSE: ", MSE, ". R2: ", R2, ". RMSE: ", RMSE, ". MAE: ", MAE, ".")
 
 return(fold_df)
 }
 
+```
+
+```{r}
 start_time <- Sys.time()
 leave_one_out <- CV(34, w_AOD, full_formula)
-leave_one_out$stations <- leave_one_out$stations %>% unlist()
-write.csv(leave_one_out, file = "C:\\Users\\aboser\\Documents\\GitHub\\PM_prediction\\Data\\Final_DFs\\LME_CV.csv")
+leave_one_out$stations <- leave_one_out$stations %>% unlist() %>% as.numeric()
+write.csv(leave_one_out, file = "C:\\Users\\aboser\\Documents\\GitHub\\PM_prediction\\Data\\Final_DFs\\LME_CV.csv", row.names = FALSE)
 end_time <- Sys.time()
 
 end_time - start_time
@@ -356,34 +418,408 @@ leave_one_out
 
 start_time <- Sys.time()
 leave_one_out_red <- CV(34, w_AOD, reduced_formula)
-leave_one_out_red$stations <- leave_one_out_red$stations %>% unlist()
-write.csv(leave_one_out_red, file = "C:\\Users\\aboser\\Documents\\GitHub\\PM_prediction\\Data\\Final_DFs\\LME_CV_red.csv")
+leave_one_out_red$stations <- leave_one_out_red$stations %>% unlist() %>% as.numeric()
+write.csv(leave_one_out_red, file = "C:\\Users\\aboser\\Documents\\GitHub\\PM_prediction\\Data\\Final_DFs\\LME_CV_red.csv", row.names = FALSE)
 end_time <- Sys.time()
 
 end_time - start_time
 
 leave_one_out_red
 ```
+
+
+Same thing just for no AOD
+```{r}
+start_time <- Sys.time()
+leave_one_out <- CV(34, wo_AOD, full_formula_wo_AOD)
+leave_one_out$stations <- leave_one_out$stations %>% unlist() %>% as.numeric()
+write.csv(leave_one_out, file = "C:\\Users\\aboser\\Documents\\GitHub\\PM_prediction\\Data\\Final_DFs\\LME_CV_wo_AOD.csv", row.names = FALSE)
+end_time <- Sys.time()
+
+end_time - start_time
+
+leave_one_out
+
+start_time <- Sys.time()
+leave_one_out_red <- CV(34, wo_AOD, reduced_formula_wo_AOD)
+leave_one_out_red$stations <- leave_one_out_red$stations %>% unlist() %>% as.numeric()
+write.csv(leave_one_out_red, file = "C:\\Users\\aboser\\Documents\\GitHub\\PM_prediction\\Data\\Final_DFs\\LME_CV_red_wo_AOD.csv", row.names = FALSE)
+end_time <- Sys.time()
+
+end_time - start_time
+
+leave_one_out_red
+```
+
 The cross-validation is ok -- a decent start. 
 
+idea: it would probably be good if I split the days into sunny and cloudy and chose which model to put them in based on that. 
+
 ##Time for step two: the GWR!
-```{r}
-#Add a column to your dataset: the residual from the first model
+
+```{r full_2_stage}
+#This uses spgwr
+
+start_time <- Sys.time()
+
 w_AOD$resid <- predict(full_model) - w_AOD$PM
-data.bw <- gwr.sel(resid ~ AOD, data = w_AOD, coords = cbind(w_AOD$Lon, w_AOD$Lat))
-data.gauss <- gwr(resid ~ AOD, data = w_AOD, coords = cbind(w_AOD$Lon, w_AOD$Lat), bandwidth = data.bw, hatmatrix = TRUE)
+data.bw <- gwr.sel(resid ~ AOD, data = w_AOD, longlat = TRUE, coords = cbind(w_AOD$Lon, w_AOD$Lat))
+data.gauss <- gwr(resid ~ AOD, data = w_AOD, longlat = TRUE, bandwidth = data.bw, hatmatrix = TRUE, coords = cbind(w_AOD$Lon, w_AOD$Lat))
 data.gauss
+
+end_time <- Sys.time()
+
+end_time - start_time
+```
+
+cross-validation
+```{r CV_2_stage}
+#using spgwr
+CV <- function(k, Data, formula){
+
+  #First create the folds
+Folds <- cvFolds(length(unique(Data$Id)),k)
+folds <- Folds$which
+names(folds) <- Folds$subsets[,1]
+
+# make folds based on location Id
+stations <- as.character(as.numeric(as.factor(Data$Id)))
+station_folds <- folds[stations]
+
+#parameters I want to save after each fold
+Es <- list()
+test_PM <- list()
+tp <- list()
+fold_df <- as.data.frame(matrix(data = NA, nrow = k + 1, ncol = 7))
+names(fold_df) <- c("stations", "MAE", "MSE", "RMSE", "NSE", "Bias", "R2")
+
+#loop through the folds and fit/test the full model each time.
+for(i in unique(station_folds)){
+  # The way the two-stage model is broken down: 
+  # 1: use the training data to fit a linear mixed effects model
+  # 2: using the training data, predict the PM using the LME and calculate the residuals
+  # 3: use the training data residuals to fit the GWR model on the residuals (actual - predicted) from the LME model
+  # 4: use the test data to predict the PM with the LME model and the residuals from the LME model using the GWR model
+  # 5: add the gwr-predicted residuals to the lme-predicted PM values to obtain the final prediction. 
+  
+  train_D <- Data[station_folds != i,]
+  test_D <- Data[station_folds == i & Data$Day %in% unique(train_D$Day),]
+  # test_D <- Data[station_folds == i & Data$Day,] #some days are not trained on. 
+  
+  # 1:
+  lme_model <- lmer(formula = formula, 
+                 data = train_D)
+  
+  # 2:
+  train_D$resid <- train_D$PM - predict(lme_model) #training residuals
+  lme_predictions <- predict(lme_model, newdata = test_D) #testing predictions
+  
+  # 3 and 4: 
+  
+  #convert train and test data to sp for easier use in spgwr
+  train_sp <- SpatialPointsDataFrame(coords = cbind(train_D$Lon, train_D$Lat), data = train_D, proj4string = CRS("+proj=longlat +datum=WGS84 +ellps=WGS84 +towgs84=0,0,0"))
+  test_sp <- SpatialPointsDataFrame(coords = cbind(test_D$Lon, test_D$Lat), data = test_D, proj4string = CRS("+proj=longlat +datum=WGS84 +ellps=WGS84 +towgs84=0,0,0"))
+  
+  # gwr.bw <- gwr.sel(resid ~ AOD, data = train_sp, longlat = TRUE) #this takes super long and the last time I ran it with k = 34 the bandwidth converged to about 17 so I'm gonna go with that. 
+  # gwr_model <- gwr(resid ~ AOD, data = train_sp, bandwidth = gwr.bw, longlat = TRUE, fit.points = test_sp, predictions = TRUE)
+  gwr_model <- gwr(resid ~ AOD, data = train_sp, bandwidth = 17, longlat = TRUE, fit.points = test_sp, predictions = TRUE)
+  gwr_resid <- gwr_model$SDF$pred
+  
+  test_predictions <- gwr_resid + lme_predictions
+  
+  test_stations <- unique(test_D$Id)
+  fold_df$stations[i] <- list(test_stations)
+  
+  E <- (test_D$PM - test_predictions)
+  fold_df$Bias[i] <- mean(E)
+  fold_df$MAE[i] <- mean(abs(E))
+  fold_df$MSE[i] <- mean(E^2)
+  fold_df$RMSE[i] <- sqrt(mean(E^2))
+  fold_df$NSE[i] <- 1 - ((mean(E^2))/var(test_D$PM))
+  fold_df$R2[i] <- R2(test_predictions, test_D$PM)
+  
+  test_PM[[i]] <- test_D$PM
+  Es[[i]] <- E
+  tp[[i]] <- test_predictions
+  
+  # paste0("Fold ", i," has MSE ", mean(E^2), ". The stations that are in this fold are: station " , test_stations , ".")
+
+}
+fold_df$stations[k+1] <- "All"
+
+fold_df$Bias[k+1] <- mean(unlist(Es))
+fold_df$MAE[k+1] <- mean(abs(unlist(Es)))
+fold_df$MSE[k+1] <- mean(unlist(Es)^2)
+fold_df$RMSE[k+1] <- sqrt(mean(unlist(Es)^2))
+fold_df$NSE[k+1] <- 1 - (mean(unlist(Es)^2)/var(unlist(test_PM)))
+fold_df$R2[k+1] <- R2(unlist(tp), unlist(test_PM))
+
+# paste0("CV MSE: ", MSE, ". R2: ", R2, ". RMSE: ", RMSE, ". MAE: ", MAE, ".")
+
+return(fold_df)
+}
 ```
 
 ```{r}
-predict(data.gauss)
-w_AOD$final_predictions <- w_AOD$resid + predict(data.gauss)
-tsR2 <- 1 - ((var(w_AOD$final_predictions))/var(w_AOD$PM))
-tsE <- w_AOD$final_predictions - w_AOD$PM
-tsMAE <- mean(abs(tsE))
-tsMSE <- mean((tsE)^2)
-tsRMSE <- sqrt(tsMSE)
+start_time <- Sys.time()
+leave_one_out <- CV(34, w_AOD, full_formula)
+leave_one_out$stations <- leave_one_out$stations %>% unlist() %>% as.numeric()
+write.csv(leave_one_out, file = "C:\\Users\\aboser\\Documents\\GitHub\\PM_prediction\\Data\\Final_DFs\\LME_CV_2S.csv", row.names = FALSE)
+end_time <- Sys.time()
 
-paste0("Unadjusted full two-stage model on only instances with AOD. MSE: ", tsMSE, ". R2: ", tsR2, ". RMSE: ", tsRMSE, ". MAE: ", tsMAE, ".")
+end_time - start_time
+
+leave_one_out
+
+start_time <- Sys.time()
+leave_one_out_red <- CV(34, w_AOD, reduced_formula)
+leave_one_out_red$stations <- leave_one_out_red$stations %>% unlist() %>% as.numeric()
+write.csv(leave_one_out_red, file = "C:\\Users\\aboser\\Documents\\GitHub\\PM_prediction\\Data\\Final_DFs\\LME_CV_red_2S.csv", row.names = FALSE)
+end_time <- Sys.time()
+
+end_time - start_time
+
+leave_one_out_red
 ```
+
+None of this works because gwr is only on AOD...: 
+```{r}
+start_time <- Sys.time()
+leave_one_out <- CV(34, wo_AOD, full_formula_wo_AOD)
+leave_one_out$stations <- leave_one_out$stations %>% unlist() %>% as.numeric()
+write.csv(leave_one_out, file = "C:\\Users\\aboser\\Documents\\GitHub\\PM_prediction\\Data\\Final_DFs\\LME_CV_2S_wo_AOD.csv", row.names = FALSE)
+end_time <- Sys.time()
+
+end_time - start_time
+
+leave_one_out
+
+start_time <- Sys.time()
+leave_one_out_red <- CV(34, wo_AOD, reduced_formula_wo_AOD)
+leave_one_out_red$stations <- leave_one_out_red$stations %>% unlist() %>% as.numeric()
+write.csv(leave_one_out_red, file = "C:\\Users\\aboser\\Documents\\GitHub\\PM_prediction\\Data\\Final_DFs\\LME_CV_red_2S_wo_AOD.csv", row.names = FALSE)
+end_time <- Sys.time()
+
+end_time - start_time
+
+leave_one_out_red
+```
+
+
+## Try #2 with gwr: more parameters edition
+
+```{r CV_2_stage}
+#using spgwr
+CV <- function(k, Data, formula, gwr_formula, bw = NA){
+
+  #First create the folds
+Folds <- cvFolds(length(unique(Data$Id)),k)
+folds <- Folds$which
+names(folds) <- Folds$subsets[,1]
+
+# make folds based on location Id
+stations <- as.character(as.numeric(as.factor(Data$Id)))
+station_folds <- folds[stations]
+
+#parameters I want to save after each fold
+Es <- list()
+test_PM <- list()
+tp <- list()
+fold_df <- as.data.frame(matrix(data = NA, nrow = k + 1, ncol = 7))
+names(fold_df) <- c("stations", "MAE", "MSE", "RMSE", "NSE", "Bias", "R2")
+
+#loop through the folds and fit/test the full model each time.
+for(i in unique(station_folds)){
+  # The way the two-stage model is broken down: 
+  # 1: use the training data to fit a linear mixed effects model
+  # 2: using the training data, predict the PM using the LME and calculate the residuals
+  # 3: use the training data residuals to fit the GWR model on the residuals (actual - predicted) from the LME model
+  # 4: use the test data to predict the PM with the LME model and the residuals from the LME model using the GWR model
+  # 5: add the gwr-predicted residuals to the lme-predicted PM values to obtain the final prediction. 
+  
+  train_D <- Data[station_folds != i,]
+  test_D <- Data[station_folds == i & Data$Day %in% unique(train_D$Day),]
+  # test_D <- Data[station_folds == i & Data$Day,] #some days are not trained on. 
+  
+  # 1:
+  lme_model <- lmer(formula = formula, 
+                 data = train_D)
+  
+  # 2:
+  train_D$resid <- train_D$PM - predict(lme_model) #training residuals
+  lme_predictions <- predict(lme_model, newdata = test_D) #testing predictions
+  
+  # 3 and 4: 
+  
+  #convert train and test data to sp for easier use in spgwr
+  train_sp <- SpatialPointsDataFrame(coords = cbind(train_D$Lon, train_D$Lat), data = train_D, proj4string = CRS("+proj=longlat +datum=WGS84 +ellps=WGS84 +towgs84=0,0,0"))
+  test_sp <- SpatialPointsDataFrame(coords = cbind(test_D$Lon, test_D$Lat), data = test_D, proj4string = CRS("+proj=longlat +datum=WGS84 +ellps=WGS84 +towgs84=0,0,0"))
+  
+  if (is.na(bw)){
+    gwr.bw <- gwr.sel(gwr_formula, data = train_sp, longlat = TRUE)
+  gwr_model <- gwr(gwr_formula, data = train_sp, bandwidth = gwr.bw, longlat = TRUE, fit.points = test_sp, predictions = TRUE)
+  } else {
+    gwr_model <- gwr(resid ~ AOD, data = train_sp, bandwidth = bw, longlat = TRUE, fit.points = test_sp, predictions = TRUE)
+  }
+
+  gwr_resid <- gwr_model$SDF$pred
+  
+  test_predictions <- gwr_resid + lme_predictions
+  
+  test_stations <- unique(test_D$Id)
+  fold_df$stations[i] <- list(test_stations)
+  
+  E <- (test_D$PM - test_predictions)
+  fold_df$Bias[i] <- mean(E)
+  fold_df$MAE[i] <- mean(abs(E))
+  fold_df$MSE[i] <- mean(E^2)
+  fold_df$RMSE[i] <- sqrt(mean(E^2))
+  fold_df$NSE[i] <- 1 - ((mean(E^2))/var(test_D$PM))
+  fold_df$R2[i] <- R2(test_predictions, test_D$PM)
+  
+  test_PM[[i]] <- test_D$PM
+  Es[[i]] <- E
+  tp[[i]] <- test_predictions
+  
+  # paste0("Fold ", i," has MSE ", mean(E^2), ". The stations that are in this fold are: station " , test_stations , ".")
+
+}
+fold_df$stations[k+1] <- "All"
+
+fold_df$Bias[k+1] <- mean(unlist(Es))
+fold_df$MAE[k+1] <- mean(abs(unlist(Es)))
+fold_df$MSE[k+1] <- mean(unlist(Es)^2)
+fold_df$RMSE[k+1] <- sqrt(mean(unlist(Es)^2))
+fold_df$NSE[k+1] <- 1 - (mean(unlist(Es)^2)/var(unlist(test_PM)))
+fold_df$R2[k+1] <- R2(unlist(tp), unlist(test_PM))
+
+# paste0("CV MSE: ", MSE, ". R2: ", R2, ". RMSE: ", RMSE, ". MAE: ", MAE, ".")
+
+return(fold_df)
+}
+```
+
+```{r}
+gwr_red <- "resid ~ AOD + 
+                      Elevation + 
+                      Emissions +
+                      Streets +
+                      Plumes_High +
+                      Plumes_Med +
+                      Plumes_Low +
+                      Max_Temp +
+                      Max_Wind +
+                      Rel_Humidity +
+                      BLH"
+
+start_time <- Sys.time()
+leave_one_out <- CV(34, w_AOD, reduced_formula, gwr_red, bw = 15)
+leave_one_out$stations <- leave_one_out$stations %>% unlist() %>% as.numeric()
+write.csv(leave_one_out, file = "C:\\Users\\aboser\\Documents\\GitHub\\PM_prediction\\Data\\Final_DFs\\CV_2S_extend_gwr.csv", row.names = FALSE)
+end_time <- Sys.time()
+
+end_time - start_time
+
+leave_one_out
+```
+I'm curious what happens if we get rid of point 55905: the forest one which is an outlier.
+```{r}
+no_55906 <- filter(w_AOD, Id != "55906")
+
+start_time <- Sys.time()
+leave_one_out <- CV(33, no_55906, reduced_formula, gwr_red, bw = 15)
+leave_one_out$stations <- leave_one_out$stations %>% unlist() %>% as.numeric()
+write.csv(leave_one_out, file = "C:\\Users\\aboser\\Documents\\GitHub\\PM_prediction\\Data\\Final_DFs\\CV_2S_extend_gwr_no_55905.csv", row.names = FALSE)
+end_time <- Sys.time()
+
+end_time - start_time
+
+leave_one_out
+```
+
+
+
+
+## Fit the model to the grid
+
+This dones't work because the computer isn't powerful enough. 
+
+Fit the two-stage model to the entire grid. It looks like the reduced model is the better one so I will do that one. I will note that a limitation is that I did not try different combinations of variables in a reduced model so there could be a model with an even better fit that I didn't get the chance to evaluate. 
+```{r}
+Grid <- read.csv(file = "C:\\Users\\aboser\\Documents\\GitHub\\PM_prediction\\Data\\Final_DFs\\Small_Grid.csv")
+
+#make day factor for random effects
+Grid$Day <- as.factor(Grid$Day)
+```
+
+```{r}
+grid_w_AOD <- filter(Grid, !is.na(AOD), !is.na(BLH))
+grid_wo_AOD <- filter(Grid, is.na(AOD), !is.na(BLH))
+```
+
+```{r}
+Fit_to_grid <- function(lme_formula, gwr_formula, training_data, full_grid, bw = NA){
+# The way the two-stage model is broken down: 
+  # 1: use the training data to fit a linear mixed effects model
+  # 2: using the training data, predict the PM using the LME and calculate the residuals
+  # 3: use the training data residuals to fit the GWR model on the residuals (actual - predicted) from the LME model
+  # 4: use the test data to predict the PM with the LME model and the residuals from the LME model using the GWR model
+  # 5: add the gwr-predicted residuals to the lme-predicted PM values to obtain the final prediction. 
+  
+  train_D <- Data[station_folds != i,]
+  test_D <- Data[station_folds == i & Data$Day %in% unique(train_D$Day),]
+  # test_D <- Data[station_folds == i & Data$Day,] #some days are not trained on. 
+  
+  # 1:
+  lme_model <- lmer(formula = lme_formula, 
+                 data = train_D)
+  
+  # 2:
+  train_D$resid <- train_D$PM - predict(lme_model) #training residuals
+  lme_predictions <- predict(lme_model, newdata = test_D) #testing predictions
+  
+  # 3 and 4: 
+  
+  #convert train and test data to sp for easier use in spgwr
+  train_sp <- SpatialPointsDataFrame(coords = cbind(train_D$Lon, train_D$Lat), data = train_D, proj4string = CRS("+proj=longlat +datum=WGS84 +ellps=WGS84 +towgs84=0,0,0"))
+  test_sp <- SpatialPointsDataFrame(coords = cbind(test_D$Lon, test_D$Lat), data = test_D, proj4string = CRS("+proj=longlat +datum=WGS84 +ellps=WGS84 +towgs84=0,0,0"))
+  
+  if (is.na(bw)){
+    gwr.bw <- gwr.sel(gwr_formula, data = train_sp, longlat = TRUE)
+  gwr_model <- gwr(gwr_formula, data = train_sp, bandwidth = gwr.bw, longlat = TRUE, fit.points = test_sp, predictions = TRUE)
+  } else {
+    gwr_model <- gwr(resid ~ AOD, data = train_sp, bandwidth = bw, longlat = TRUE, fit.points = test_sp, predictions = TRUE)
+  }
+
+  gwr_resid <- gwr_model$SDF$pred
+  
+  test_predictions <- gwr_resid + lme_predictions
+  
+  # test_D$lme_predictions <- lme_predictions
+  # test_D$gwr_resid <- gwr_resid
+  test_D$prediction <- test_predictions
+  
+  return(select(test_D, c("Id", "Day", "prediction")))
+}
+```
+
+```{r}
+start_time <- Sys.time()
+
+two_stage_grid <- Fit_to_grid(lme_formula = reduced_formula, gwr_formula = gwr_formula, training_data = w_AOD, full_grid = grid_w_AOD, bw = NA)
+two_stage_grid_wo_AOD <- Fit_to_grid(formula = reduced_formula_wo_AOD, training_data = wo_AOD, full_grid = grid_wo_AOD)
+
+end_time <- Sys.time()
+
+end_time - start_time
+```
+
+
+```{r}
+grid_2S <- rbind(two_stage_grid, two_stage_grid_wo_AOD)
+grid_2S <- pivot_wider(grid_2S, names_from = Day, names_prefix = "Day", values_from = prediction)
+
+write.csv(grid_2S, file = "C:\\Users\\aboser\\Documents\\GitHub\\PM_prediction\\Data\\Final_DFs\\grid_2S.csv", row.names = FALSE)
+```
+
 
