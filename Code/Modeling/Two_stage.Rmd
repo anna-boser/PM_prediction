@@ -90,183 +90,162 @@ LME_formula <- "PM ~ Elevation +
 ```
 
 ```{r}
-GWR_formula <- "resid ~ AOD + 
-                      Elevation + 
-                      Emissions +
-                      Streets +
-                      Plumes_High +
-                      Plumes_Med +
-                      Plumes_Low +
-                      Max_Temp +
-                      Max_Wind +
-                      Rel_Humidity +
-                      BLH"
+GWR_formula <- "resid ~ AOD"
 ```
 
 
 ```{r R2_function}
-R2 <- function(prediction, true){
-  (sum(
-    (prediction - mean(prediction))
-    *(true - mean(true))
-    )/
-      (sqrt(
-        sum(
-          (prediction - mean(prediction)
-          )^2))*
-         sqrt(
-           sum(
-             ((true - mean(true))^2)))
-       ))^2
-}
-
-NSE <- function(prediction, true){
-  1 - (sum((prediction - true)^2)/sum((true - mean(true))^2))
-}
-
-Bias <- function(prediction, true){
-  mean(prediction - true)
-}
-
-MAE <- function(prediction, true){
-  mean(abs(prediction - true))
-}
-
-MSE <- function(prediction, true){
-  mean((prediction - true)^2)
-}
-
-RMSE <- function(prediction, true){
-  sqrt(mean((prediction - true)^2))
-}
-```
-
-```{r CV_2_stage}
-CV <- function(AOD_Data, wo_AOD_Data, lme_formula, gwr_formula, bwAOD = NA, bw_woAOD = NA){
-
-# make folds based on location Id
-folds <- unique(AOD_Data$Id)
-paste0("Folds = k = ", length(folds))
-
-#parameters I want to save after each fold
-w_AOD_prediction <- c()
-w_AOD_true <- c()
-
-wo_AOD_prediction <- c()
-wo_AOD_true <- c()
-
-w_AOD_df <- as.data.frame(matrix(data = NA, nrow = length(folds) + 1, ncol = 7))
-wo_AOD_df <- as.data.frame(matrix(data = NA, nrow = length(folds) + 1, ncol = 7))
-All_df <- as.data.frame(matrix(data = NA, nrow = length(folds) + 1, ncol = 7))
-
-names(w_AOD_df) <- c("station", "MAE", "MSE", "RMSE", "NSE", "Bias", "R2")
-names(wo_AOD_df) <- c("station", "MAE", "MSE", "RMSE", "NSE", "Bias", "R2")
-names(All_df) <- c("station", "MAE", "MSE", "RMSE", "NSE", "Bias", "R2")
-
-#loop through the folds and fit/test the full model each time.
-for(i in 1:length(folds)){
-  # The way the two-stage model is broken down: 
-  # 1: use the training data to fit a linear mixed effects model
-  # 2: using the training data, predict the PM using the LME and calculate the residuals
-  # 3: use the training data residuals to fit the GWR model on the residuals (actual - predicted) from the LME model
-  # 4: use the test data to predict the PM with the LME model and the residuals from the LME model using the GWR model
-  # 5: add the gwr-predicted residuals to the lme-predicted PM values to obtain the final prediction. 
-  
-  train_AOD <- filter(AOD_Data, Id != folds[i])
-  train_wo_AOD <- filter(wo_AOD_Data, Id != folds[i]) #train on all with indicator
-  
-  test_AOD <- filter(AOD_Data, Id == folds[i], Day %in% unique(train_AOD$Day)) #make sure you trained on the days
-  test_wo_AOD <- filter(wo_AOD_Data, Id == folds[i], AOD == 0, Day %in% unique(train_wo_AOD$Day)) #test on only days missing AOD; make sure you trained on the days
-  
-  # 1:
-  AOD_lme <- lmer(formula = lme_formula, 
-                 data = train_AOD)
-  wo_AOD_lme <- lmer(formula = lme_formula, 
-                 data = train_wo_AOD)
-  
-  # 2:
-  train_AOD$resid <- train_AOD$PM - predict(AOD_lme) #training residuals
-  AOD_lme_predictions <- predict(AOD_lme, newdata = test_AOD) #testing predictions
-  
-  train_wo_AOD$resid <- train_wo_AOD$PM - predict(wo_AOD_lme) #training residuals
-  wo_AOD_lme_predictions <- predict(wo_AOD_lme, newdata = test_wo_AOD) #testing predictions
-  
-  # 3 and 4: 
-  
-  #convert train and test data to sp for easier use in spgwr
-  train_sp_AOD <- SpatialPointsDataFrame(coords = cbind(train_AOD$Lon, train_AOD$Lat), data = train_AOD, proj4string = CRS("+proj=longlat +datum=WGS84 +ellps=WGS84 +towgs84=0,0,0"))
-  test_sp_AOD <- SpatialPointsDataFrame(coords = cbind(test_AOD$Lon, test_AOD$Lat), data = test_AOD, proj4string = CRS("+proj=longlat +datum=WGS84 +ellps=WGS84 +towgs84=0,0,0"))
-  
-  train_sp_wo_AOD <- SpatialPointsDataFrame(coords = cbind(train_wo_AOD$Lon, train_wo_AOD$Lat), data = train_wo_AOD, proj4string = CRS("+proj=longlat +datum=WGS84 +ellps=WGS84 +towgs84=0,0,0"))
-  test_sp_wo_AOD <- SpatialPointsDataFrame(coords = cbind(test_wo_AOD$Lon, test_wo_AOD$Lat), data = test_wo_AOD, proj4string = CRS("+proj=longlat +datum=WGS84 +ellps=WGS84 +towgs84=0,0,0"))
-  
-  if (is.na(bwAOD)){
-    gwr.bw.AOD <- gwr.sel(gwr_formula, data = train_sp_AOD, longlat = TRUE)
-    gwr_model_AOD <- gwr(gwr_formula, data = train_sp_AOD, bandwidth = gwr.bw.AOD, longlat = TRUE, fit.points = test_sp_AOD, predictions = TRUE)
-  
-    gwr.bw.wo.AOD <- gwr.sel(gwr_formula, data = train_sp_wo_AOD, longlat = TRUE)
-    gwr_model_wo_AOD <- gwr(gwr_formula, data = train_sp_wo_AOD, bandwidth = gwr.bw.wo.AOD, longlat = TRUE, fit.points = test_sp_wo_AOD, predictions = TRUE)
-  } else {
-    gwr_model_AOD <- gwr(gwr_formula, data = train_sp_AOD, bandwidth = bwAOD, longlat = TRUE, fit.points = test_sp_AOD, predictions = TRUE)
-    
-    gwr_model_wo_AOD <- gwr(gwr_formula, data = train_sp_wo_AOD, bandwidth = bw_woAOD, longlat = TRUE, fit.points = test_sp_wo_AOD, predictions = TRUE)
-  }
-
-  gwr_resid_AOD <- gwr_model_AOD$SDF$pred
-  gwr_resid_wo_AOD <- gwr_model_wo_AOD$SDF$pred
-  
-  AOD_test_predictions <- gwr_resid_AOD + AOD_lme_predictions
-  wo_AOD_test_predictions <- gwr_resid_wo_AOD + wo_AOD_lme_predictions
-  
-  update_df <- function(df, i, id, test_pred, actual){
-    df$station[i] <- id
-    df$MAE[i] <- MAE(test_pred, actual)
-    df$MSE[i] <- MSE(test_pred, actual)
-    df$Bias[i] <- Bias(test_pred, actual) 
-    df$RMSE[i] <- RMSE(test_pred, actual)
-    df$R2[i] <- R2(test_pred, actual)
-    df$NSE[i] <- NSE(test_pred, actual)
-    return(df)
-  }
-  
-  
-  w_AOD_df <- update_df(w_AOD_df, i, folds[i], AOD_test_predictions, test_AOD$PM)
-  wo_AOD_df <- update_df(wo_AOD_df, i, folds[i], wo_AOD_test_predictions, test_wo_AOD$PM)
-  All_df <- update_df(All_df, i, folds[i], c(AOD_test_predictions, wo_AOD_test_predictions), c(test_AOD$PM, test_wo_AOD$PM))
-  
-  w_AOD_prediction <- c(w_AOD_prediction, AOD_test_predictions)
-  w_AOD_true <- c(w_AOD_true, test_AOD$PM)
-
-  wo_AOD_prediction <- c(wo_AOD_prediction, wo_AOD_test_predictions)
-  wo_AOD_true <- c(wo_AOD_true, test_wo_AOD$PM)
-}
-w_AOD_df <- update_df(w_AOD_df, length(folds) + 1, "All", w_AOD_prediction, w_AOD_true)
-wo_AOD_df <- update_df(wo_AOD_df, length(folds) + 1, "All", wo_AOD_prediction, wo_AOD_true)
-All_df <- update_df(All_df, length(folds) + 1, "All", c(w_AOD_prediction, wo_AOD_prediction), c(w_AOD_true, wo_AOD_true))
-
-return(list(w_AOD_df, wo_AOD_df, All_df))
-}
+# R2 <- function(prediction, true){
+#   (sum(
+#     (prediction - mean(prediction))
+#     *(true - mean(true))
+#     )/
+#       (sqrt(
+#         sum(
+#           (prediction - mean(prediction)
+#           )^2))*
+#          sqrt(
+#            sum(
+#              ((true - mean(true))^2)))
+#        ))^2
+# }
+# 
+# NSE <- function(prediction, true){
+#   1 - (sum((prediction - true)^2)/sum((true - mean(true))^2))
+# }
+# 
+# Bias <- function(prediction, true){
+#   mean(prediction - true)
+# }
+# 
+# MAE <- function(prediction, true){
+#   mean(abs(prediction - true))
+# }
+# 
+# MSE <- function(prediction, true){
+#   mean((prediction - true)^2)
+# }
+# 
+# RMSE <- function(prediction, true){
+#   sqrt(mean((prediction - true)^2))
+# }
+# ```
+# 
+# ```{r CV_2_stage}
+# CV <- function(AOD_Data, wo_AOD_Data, lme_formula, gwr_formula, bwAOD = NA, bw_woAOD = NA){
+# 
+# # make folds based on location Id
+# folds <- unique(AOD_Data$Id)
+# paste0("Folds = k = ", length(folds))
+# 
+# #parameters I want to save after each fold
+# w_AOD_prediction <- c()
+# w_AOD_true <- c()
+# 
+# wo_AOD_prediction <- c()
+# wo_AOD_true <- c()
+# 
+# w_AOD_df <- as.data.frame(matrix(data = NA, nrow = length(folds) + 1, ncol = 7))
+# wo_AOD_df <- as.data.frame(matrix(data = NA, nrow = length(folds) + 1, ncol = 7))
+# All_df <- as.data.frame(matrix(data = NA, nrow = length(folds) + 1, ncol = 7))
+# 
+# names(w_AOD_df) <- c("station", "MAE", "MSE", "RMSE", "NSE", "Bias", "R2")
+# names(wo_AOD_df) <- c("station", "MAE", "MSE", "RMSE", "NSE", "Bias", "R2")
+# names(All_df) <- c("station", "MAE", "MSE", "RMSE", "NSE", "Bias", "R2")
+# 
+# #loop through the folds and fit/test the full model each time.
+# for(i in 1:length(folds)){
+#   # The way the two-stage model is broken down: 
+#   # 1: use the training data to fit a linear mixed effects model
+#   # 2: using the training data, predict the PM using the LME and calculate the residuals
+#   # 3: use the training data residuals to fit the GWR model on the residuals (actual - predicted) from the LME model
+#   # 4: use the test data to predict the PM with the LME model and the residuals from the LME model using the GWR model
+#   # 5: add the gwr-predicted residuals to the lme-predicted PM values to obtain the final prediction. 
+#   
+#   train_AOD <- filter(AOD_Data, Id != folds[i])
+#   train_wo_AOD <- filter(wo_AOD_Data, Id != folds[i]) #train on all with indicator
+#   
+#   test_AOD <- filter(AOD_Data, Id == folds[i], Day %in% unique(train_AOD$Day)) #make sure you trained on the days
+#   test_wo_AOD <- filter(wo_AOD_Data, Id == folds[i], AOD == 0, Day %in% unique(train_wo_AOD$Day)) #test on only days missing AOD; make sure you trained on the days
+#   
+#   # 1:
+#   AOD_lme <- lmer(formula = lme_formula, 
+#                  data = train_AOD)
+#   wo_AOD_lme <- lmer(formula = lme_formula, 
+#                  data = train_wo_AOD)
+#   
+#   # 2:
+#   train_AOD$resid <- train_AOD$PM - predict(AOD_lme) #training residuals
+#   AOD_lme_predictions <- predict(AOD_lme, newdata = test_AOD) #testing predictions
+#   
+#   train_wo_AOD$resid <- train_wo_AOD$PM - predict(wo_AOD_lme) #training residuals
+#   wo_AOD_lme_predictions <- predict(wo_AOD_lme, newdata = test_wo_AOD) #testing predictions
+#   
+#   # 3 and 4: 
+#   
+#   #convert train and test data to sp for easier use in spgwr
+#   train_sp_AOD <- SpatialPointsDataFrame(coords = cbind(train_AOD$Lon, train_AOD$Lat), data = train_AOD, proj4string = CRS("+proj=longlat +datum=WGS84 +ellps=WGS84 +towgs84=0,0,0"))
+#   test_sp_AOD <- SpatialPointsDataFrame(coords = cbind(test_AOD$Lon, test_AOD$Lat), data = test_AOD, proj4string = CRS("+proj=longlat +datum=WGS84 +ellps=WGS84 +towgs84=0,0,0"))
+#   
+#   train_sp_wo_AOD <- SpatialPointsDataFrame(coords = cbind(train_wo_AOD$Lon, train_wo_AOD$Lat), data = train_wo_AOD, proj4string = CRS("+proj=longlat +datum=WGS84 +ellps=WGS84 +towgs84=0,0,0"))
+#   test_sp_wo_AOD <- SpatialPointsDataFrame(coords = cbind(test_wo_AOD$Lon, test_wo_AOD$Lat), data = test_wo_AOD, proj4string = CRS("+proj=longlat +datum=WGS84 +ellps=WGS84 +towgs84=0,0,0"))
+#   
+#   if (is.na(bwAOD)){
+#     gwr.bw.AOD <- gwr.sel(gwr_formula, data = train_sp_AOD, longlat = TRUE)
+#     gwr_model_AOD <- gwr(gwr_formula, data = train_sp_AOD, bandwidth = gwr.bw.AOD, longlat = TRUE, fit.points = test_sp_AOD, predictions = TRUE)
+#   
+#     gwr.bw.wo.AOD <- gwr.sel(gwr_formula, data = train_sp_wo_AOD, longlat = TRUE)
+#     gwr_model_wo_AOD <- gwr(gwr_formula, data = train_sp_wo_AOD, bandwidth = gwr.bw.wo.AOD, longlat = TRUE, fit.points = test_sp_wo_AOD, predictions = TRUE)
+#   } else {
+#     gwr_model_AOD <- gwr(gwr_formula, data = train_sp_AOD, bandwidth = bwAOD, longlat = TRUE, fit.points = test_sp_AOD, predictions = TRUE)
+#     
+#     gwr_model_wo_AOD <- gwr(gwr_formula, data = train_sp_wo_AOD, bandwidth = bw_woAOD, longlat = TRUE, fit.points = test_sp_wo_AOD, predictions = TRUE)
+#   }
+# 
+#   gwr_resid_AOD <- gwr_model_AOD$SDF$pred
+#   gwr_resid_wo_AOD <- gwr_model_wo_AOD$SDF$pred
+#   
+#   AOD_test_predictions <- gwr_resid_AOD + AOD_lme_predictions
+#   wo_AOD_test_predictions <- gwr_resid_wo_AOD + wo_AOD_lme_predictions
+#   
+#   update_df <- function(df, i, id, test_pred, actual){
+#     df$station[i] <- id
+#     df$MAE[i] <- MAE(test_pred, actual)
+#     df$MSE[i] <- MSE(test_pred, actual)
+#     df$Bias[i] <- Bias(test_pred, actual) 
+#     df$RMSE[i] <- RMSE(test_pred, actual)
+#     df$R2[i] <- R2(test_pred, actual)
+#     df$NSE[i] <- NSE(test_pred, actual)
+#     return(df)
+#   }
+#   
+#   
+#   w_AOD_df <- update_df(w_AOD_df, i, folds[i], AOD_test_predictions, test_AOD$PM)
+#   wo_AOD_df <- update_df(wo_AOD_df, i, folds[i], wo_AOD_test_predictions, test_wo_AOD$PM)
+#   All_df <- update_df(All_df, i, folds[i], c(AOD_test_predictions, wo_AOD_test_predictions), c(test_AOD$PM, test_wo_AOD$PM))
+#   
+#   w_AOD_prediction <- c(w_AOD_prediction, AOD_test_predictions)
+#   w_AOD_true <- c(w_AOD_true, test_AOD$PM)
+# 
+#   wo_AOD_prediction <- c(wo_AOD_prediction, wo_AOD_test_predictions)
+#   wo_AOD_true <- c(wo_AOD_true, test_wo_AOD$PM)
+# }
+# w_AOD_df <- update_df(w_AOD_df, length(folds) + 1, "All", w_AOD_prediction, w_AOD_true)
+# wo_AOD_df <- update_df(wo_AOD_df, length(folds) + 1, "All", wo_AOD_prediction, wo_AOD_true)
+# All_df <- update_df(All_df, length(folds) + 1, "All", c(w_AOD_prediction, wo_AOD_prediction), c(w_AOD_true, wo_AOD_true))
+# 
+# return(list(w_AOD_df, wo_AOD_df, All_df))
+# }
 ```
 
 ```{r}
-CV <- CV(AOD_Data = w_AOD, wo_AOD_Data = ind_AOD, lme_formula = LME_formula, gwr_formula = GWR_formula, bwAOD = 15, bw_woAOD = 13)
+# CV <- CV(AOD_Data = w_AOD, wo_AOD_Data = ind_AOD, lme_formula = LME_formula, gwr_formula = GWR_formula, bwAOD = 15, bw_woAOD = 13)
 ```
 
 
-###################################################################
-### FOR SOME REASON I USED TO GET WAY BETTER RESULTS WITH THIS: ###
-###################################################################
+
 ```{r}
-CV <- function(k, Data, formula, gwr_formula, bw = NA){
-
-  #First create the folds
-Folds <- cvFolds(length(unique(Data$Id)),k)
-folds <- Folds$which
-names(folds) <- Folds$subsets[,1]
-
-# make folds based on location Id
-stations <- as.character(as.numeric(as.factor(Data$Id)))
-station_folds <- folds[stations]
+CV <- function(k, Data, indData, formula, gwr_formula, bw = NA, bw2 = NA){
 
 #parameters I want to save after each fold
 Es <- list()
@@ -275,8 +254,11 @@ tp <- list()
 fold_df <- as.data.frame(matrix(data = NA, nrow = k + 1, ncol = 7))
 names(fold_df) <- c("stations", "MAE", "MSE", "RMSE", "NSE", "Bias", "R2")
 
+Ids <- unique(Data$Id)
+
 #loop through the folds and fit/test the full model each time.
-for(i in unique(station_folds)){
+for(i in 1:length(Ids)){
+  paste0("Fold ", i)
   # The way the two-stage model is broken down: 
   # 1: use the training data to fit a linear mixed effects model
   # 2: using the training data, predict the PM using the LME and calculate the residuals
@@ -284,47 +266,72 @@ for(i in unique(station_folds)){
   # 4: use the test data to predict the PM with the LME model and the residuals from the LME model using the GWR model
   # 5: add the gwr-predicted residuals to the lme-predicted PM values to obtain the final prediction. 
   
-  train_D <- Data[station_folds != i,]
-  test_D <- Data[station_folds == i & Data$Day %in% unique(train_D$Day),]
+  train_D <- Data[Data$Id != Ids[i],]
+  test_D <- Data[Data$Id == Ids[i] & Data$Day %in% unique(train_D$Day),]
   # test_D <- Data[station_folds == i & Data$Day,] #some days are not trained on. 
+  train_ind <- indData[indData$Id != Ids[i],]
+  test_ind <- indData[indData$Id == Ids[i] 
+                      & indData$Day %in% unique(train_ind$Day) 
+                      & indData$AOD == 0,]
   
   # 1:
   lme_model <- lmer(formula = formula, 
                  data = train_D)
+  lme_model_ind <- lmer(formula = formula, 
+                 data = train_ind)
   
   # 2:
   train_D$resid <- train_D$PM - predict(lme_model) #training residuals
   lme_predictions <- predict(lme_model, newdata = test_D) #testing predictions
+  
+  train_ind$resid <- train_ind$PM - predict(lme_model_ind) #training residuals
+  lme_predictions_ind <- predict(lme_model_ind, newdata = test_ind) #testing predictions
   
   # 3 and 4: 
   
   #convert train and test data to sp for easier use in spgwr
   train_sp <- SpatialPointsDataFrame(coords = cbind(train_D$Lon, train_D$Lat), data = train_D, proj4string = CRS("+proj=longlat +datum=WGS84 +ellps=WGS84 +towgs84=0,0,0"))
   test_sp <- SpatialPointsDataFrame(coords = cbind(test_D$Lon, test_D$Lat), data = test_D, proj4string = CRS("+proj=longlat +datum=WGS84 +ellps=WGS84 +towgs84=0,0,0"))
-  
+
   if (is.na(bw)){
     gwr.bw <- gwr.sel(gwr_formula, data = train_sp, longlat = TRUE)
   gwr_model <- gwr(gwr_formula, data = train_sp, bandwidth = gwr.bw, longlat = TRUE, fit.points = test_sp, predictions = TRUE)
   } else {
     gwr_model <- gwr(resid ~ AOD, data = train_sp, bandwidth = bw, longlat = TRUE, fit.points = test_sp, predictions = TRUE)
   }
+  
+    train_sp_ind <- SpatialPointsDataFrame(coords = cbind(train_ind$Lon, train_ind$Lat), data = train_ind, proj4string = CRS("+proj=longlat +datum=WGS84 +ellps=WGS84 +towgs84=0,0,0"))
+  test_sp_ind <- SpatialPointsDataFrame(coords = cbind(test_ind$Lon, test_ind$Lat), data = test_ind, proj4string = CRS("+proj=longlat +datum=WGS84 +ellps=WGS84 +towgs84=0,0,0"))
+
+  if (is.na(bw2)){
+    gwr.bw_ind <- gwr.sel(gwr_formula, data = train_sp_ind, longlat = TRUE)
+  gwr_model_ind <- gwr(gwr_formula, data = train_sp_ind, bandwidth = gwr.bw_ind, longlat = TRUE, fit.points = test_sp_ind, predictions = TRUE)
+  } else {
+    gwr_model_ind <- gwr(resid ~ AOD, data = train_sp_ind, bandwidth = bw2, longlat = TRUE, fit.points = test_sp_ind, predictions = TRUE)
+  }
 
   gwr_resid <- gwr_model$SDF$pred
-  
+  gwr_resid_ind <- gwr_model_ind$SDF$pred
+
   test_predictions <- gwr_resid + lme_predictions
+  test_predictions_ind <- gwr_resid_ind + lme_predictions_ind
   
+  test_predictions <- c(test_predictions, test_predictions_ind)
+  test_actual <- c(test_D$PM, test_ind$PM)
+
   test_stations <- unique(test_D$Id)
+
   fold_df$stations[i] <- list(test_stations)
-  
-  E <- (test_D$PM - test_predictions)
+
+  E <- (test_actual - test_predictions)
   fold_df$Bias[i] <- mean(E)
   fold_df$MAE[i] <- mean(abs(E))
   fold_df$MSE[i] <- mean(E^2)
   fold_df$RMSE[i] <- sqrt(mean(E^2))
   fold_df$NSE[i] <- 1 - ((mean(E^2))/var(test_D$PM))
-  fold_df$R2[i] <- R2(test_predictions, test_D$PM)
+  fold_df$R2[i] <- R2(test_predictions, test_actual)
   
-  test_PM[[i]] <- test_D$PM
+  test_PM[[i]] <- test_actual
   Es[[i]] <- E
   tp[[i]] <- test_predictions
   
@@ -347,35 +354,14 @@ return(fold_df)
 ```
 
 ```{r}
-gwr_red <- "resid ~ AOD + 
-                      Elevation + 
-                      Emissions +
-                      Streets +
-                      Plumes_High +
-                      Plumes_Med +
-                      Plumes_Low +
-                      Max_Temp +
-                      Max_Wind +
-                      Rel_Humidity +
-                      BLH"
-
 start_time <- Sys.time()
-leave_one_out <- CV(34, w_AOD, reduced_formula, gwr_red, bw = 15)
+leave_one_out <- CV(34, w_AOD, ind_AOD, LME_formula, GWR_formula, bw = 15, bw2 = 13)
 leave_one_out$stations <- leave_one_out$stations %>% unlist() %>% as.numeric()
-write.csv(leave_one_out, file = "C:\\Users\\aboser\\Documents\\GitHub\\PM_prediction\\Data\\Final_DFs\\CV_2S_extend_gwr.csv", row.names = FALSE)
+write.csv(leave_one_out, file = "C:\\Users\\aboser\\Documents\\GitHub\\PM_prediction\\Data\\Final_DFs\\2S_eval.csv", row.names = FALSE)
 end_time <- Sys.time()
 
 end_time - start_time
 ```
-########################################################################
-########################################################################
-
-
-
-
-
-
-
 
 
 #test data (full grid)
@@ -464,12 +450,40 @@ Fit_to_grid <- function(lme_formula, gwr_formula, train_AOD, train_wo_AOD, test_
 ```
 
 ```{r}
+start_time = Sys.time()
 Full_grid <- Fit_to_grid(lme_formula = LME_formula, gwr_formula = GWR_formula, train_AOD = w_AOD, train_wo_AOD = ind_AOD, test_AOD = Grid_w_AOD, test_wo_AOD = Grid_wo_AOD, bw = NA)
+end_time <-  Sys.time()
+end_time - start_time
 ```
 
 ```{r}
-write.csv(Full_grid, file = "C:\\Users\\aboser\\Documents\\GitHub\\PM_prediction\\Data\\Final_DFs\\Two-stage_Grid.csv", row.names = FALSE)
+write.csv(Full_grid, file = "C:\\Users\\aboser\\Documents\\GitHub\\PM_prediction\\Data\\Final_DFs\\Model_maps\\2S_Grid_redGWR.csv", row.names = FALSE)
+```
+
+```{r}
+Full_avg <- cbind(Full_grid[,1], apply(Full_grid[,2:327], 1, mean, na.rm = TRUE))
+write.csv(Full_avg, file = "C:\\Users\\aboser\\Documents\\GitHub\\PM_prediction\\Data\\Final_DFs\\Model_maps\\2S_Avg_redGWR.csv", row.names = FALSE)
+```
+
+```{r}
+Full_med <- cbind(Full_grid[,1], "Median" = apply(Full_grid[,2:327], 1, median, na.rm = TRUE))
+write.csv(Full_avg, file = "C:\\Users\\aboser\\Documents\\GitHub\\PM_prediction\\Data\\Final_DFs\\Model_maps\\2S_med_redGWR.csv", row.names = FALSE)
+```
+
+```{r}
+Full_DOI <- select(Full_grid, Id, Day244, Day245, Day282, Day283, Day284, Day285, Day286)
+write.csv(Full_DOI, file = "C:\\Users\\aboser\\Documents\\GitHub\\PM_prediction\\Data\\Final_DFs\\Model_maps\\2S_DOI_redGWR.csv", row.names = FALSE)
 ```
 
 
+```{r}
+eval <- read.csv("C:\\Users\\aboser\\Documents\\GitHub\\PM_prediction\\Data\\Final_DFs\\Model_evaluations\\2S\\2S_eval_noAll.csv")
+evalmean <- read.csv("C:\\Users\\aboser\\Documents\\GitHub\\PM_prediction\\Data\\Final_DFs\\Model_means\\ModelMeans.csv")
+smallevalmean <- read.csv("C:\\Users\\aboser\\Documents\\GitHub\\PM_prediction\\Data\\Final_DFs\\Model_means\\SmallGridModelMeans.csv")
+smallid <- read.csv("C:\\Users\\aboser\\Documents\\GitHub\\PM_prediction\\Data\\Final_DFs\\Small_Ids.csv")
+```
+
+```{r}
+means <- apply(eval[,2:7], 2, mean)
+```
 
