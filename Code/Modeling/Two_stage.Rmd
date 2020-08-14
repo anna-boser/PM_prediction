@@ -461,13 +461,13 @@ write.csv(Full_grid, file = "C:\\Users\\aboser\\Documents\\GitHub\\PM_prediction
 ```
 
 ```{r}
-Full_avg <- cbind(Full_grid[,1], apply(Full_grid[,2:327], 1, mean, na.rm = TRUE))
+Full_avg <- cbind("Id" = Full_grid[,1], "Mean" = apply(Full_grid[,2:327], 1, mean, na.rm = TRUE))
 write.csv(Full_avg, file = "C:\\Users\\aboser\\Documents\\GitHub\\PM_prediction\\Data\\Final_DFs\\Model_maps\\2S_Avg_redGWR.csv", row.names = FALSE)
 ```
 
 ```{r}
-Full_med <- cbind(Full_grid[,1], "Median" = apply(Full_grid[,2:327], 1, median, na.rm = TRUE))
-write.csv(Full_avg, file = "C:\\Users\\aboser\\Documents\\GitHub\\PM_prediction\\Data\\Final_DFs\\Model_maps\\2S_med_redGWR.csv", row.names = FALSE)
+Full_med <- cbind("Id" = Full_grid[,1], "Median" = apply(Full_grid[,2:327], 1, median, na.rm = TRUE))
+write.csv(Full_med, file = "C:\\Users\\aboser\\Documents\\GitHub\\PM_prediction\\Data\\Final_DFs\\Model_maps\\2S_med_redGWR.csv", row.names = FALSE)
 ```
 
 ```{r}
@@ -485,5 +485,46 @@ smallid <- read.csv("C:\\Users\\aboser\\Documents\\GitHub\\PM_prediction\\Data\\
 
 ```{r}
 means <- apply(eval[,2:7], 2, mean)
+smalleval <- filter(eval, stations %in% smallid$x)
+smallmeans <- apply(smalleval[,2:7], 2, mean)
+
+evalmean[10, 2:7] <- means
+smallevalmean[10, 2:7] <- smallmeans
+
+evalmean[10, 1] <- "Two-Stage"
+smallevalmean[10, 1] <- "Two-Stage"
+```
+
+```{r}
+write.csv(evalmean, "C:\\Users\\aboser\\Documents\\GitHub\\PM_prediction\\Data\\Final_DFs\\Model_means\\ModelMeans_w2S.csv")
+write.csv(smallevalmean, "C:\\Users\\aboser\\Documents\\GitHub\\PM_prediction\\Data\\Final_DFs\\Model_means\\SmallGridModelMeans_w2S.csv")
+```
+
+PM on day 286
+```{r}
+pm <- st_read("C:\\Users\\aboser\\Documents\\GitHub\\PM_prediction\\Data\\Variables\\PM\\PM.shp")
+pm$geometry <- NULL
+doi <- paste0("Avg_Day", c(244:245, 282:286))
+pm_doi <- pm[,c("Id", doi)]
+pm_doi <- filter(pm_doi, Id %in% eval$stations)
+write.csv(pm_doi, "C:\\Users\\aboser\\Documents\\GitHub\\PM_prediction\\Data\\Final_DFs\\Model_maps\\PM_DOI.csv")
+```
+
+Pm before, during, and after
+pm
+```{r}
+pm <- st_read("C:\\Users\\aboser\\Documents\\GitHub\\PM_prediction\\Data\\Variables\\PM\\PM.shp")
+pm$geometry <- NULL
+bda <- paste0("Avg_Day", c(274, 286, 304))
+pm_bda <- pm[,c("Id", bda)]
+pm_bda <- filter(pm_bda, Id %in% eval$stations)
+write.csv(pm_bda, "C:\\Users\\aboser\\Documents\\GitHub\\PM_prediction\\Data\\Final_DFs\\Model_maps\\PM_bda.csv")
+```
+CatBoost
+```{r}
+CAT <- read.csv("C:\\Users\\aboser\\Documents\\GitHub\\PM_prediction\\Data\\Final_DFs\\Model_maps\\CAT_Grid.csv")
+bda <- paste0("Day", c(274, 286, 304))
+cat_bda <- CAT[,c("Id", bda)]
+write.csv(cat_bda, "C:\\Users\\aboser\\Documents\\GitHub\\PM_prediction\\Data\\Final_DFs\\Model_maps\\cat_bda.csv")
 ```
 

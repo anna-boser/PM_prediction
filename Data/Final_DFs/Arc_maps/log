@@ -1,0 +1,3 @@
+202008071411   0     4     0aboser C:\Users\aboser\Documents\GitHub\PM_prediction\Data\Final_DFs\Arc_maps\CAT_R2 = IDW(fishnet_label,  'CAT.csv.R2', #, 2.0, SAMPLE
+202008071423   0     3     0aboser C:\Users\aboser\Documents\GitHub\PM_prediction\Data\Final_DFs\Arc_maps\GBM_R2 = IDW(PM Monitor,  'GMBcustom.csv.R2', #, 2.0, SAM
+202008071429   0     3     0aboser C:\Users\aboser\Documents\GitHub\PM_prediction\Data\Final_DFs\Arc_maps\2S_R2 = IDW(PM Monitor,  '2S_eval_noAll.csv.R2', #, 2.0,
