@@ -35,5 +35,8 @@ Poster_presentation/Boser_PM_presentation.mp4
 
 Data/MAIAC/FromNASAEarth(not_used)/
 
-Data/HRRR/
+# Data/HRRR/
+# Data/HRRR/clipped_tiffs
+Data/HRRR/tiffs
+Data/HRRR/grib2
 
