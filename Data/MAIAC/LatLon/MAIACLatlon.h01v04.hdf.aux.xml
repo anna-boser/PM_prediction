@@ -1,0 +1,15 @@
+<PAMDataset>
+  <Subdataset name="latlon:lat">
+    <PAMDataset>
+      <Metadata>
+        <MDI key="HDFEOSVersion">HDFEOS_V2.12</MDI>
+      </Metadata>
+      <Metadata domain="OVERVIEWS">
+        <MDI key="OVERVIEW_FILE">:::BASE:::MAIACLatlon.h01v04.hdf_0.ovr</MDI>
+      </Metadata>
+      <Metadata domain="Esri">
+        <MDI key="PyramidResamplingType">NEAREST</MDI>
+      </Metadata>
+    </PAMDataset>
+  </Subdataset>
+</PAMDataset>

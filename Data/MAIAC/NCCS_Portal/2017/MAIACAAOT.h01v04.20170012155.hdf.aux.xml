@@ -1,0 +1,24 @@
+<PAMDataset>
+  <Subdataset name="grid1km:Optical_Depth_055">
+    <PAMDataset>
+      <Metadata>
+        <MDI key="add_offset">0</MDI>
+        <MDI key="HDFEOSVersion">HDFEOS_V2.12</MDI>
+        <MDI key="long_name">AOT at 0.55 micron</MDI>
+        <MDI key="scale_factor">0.001</MDI>
+        <MDI key="unit">None</MDI>
+        <MDI key="valid_range">-100, 5000</MDI>
+        <MDI key="_FillValue">-28672</MDI>
+      </Metadata>
+      <Metadata domain="OVERVIEWS">
+        <MDI key="OVERVIEW_FILE">:::BASE:::MAIACAAOT.h01v04.20170012155.hdf_0.ovr</MDI>
+      </Metadata>
+      <Metadata domain="Esri">
+        <MDI key="PyramidResamplingType">NEAREST</MDI>
+      </Metadata>
+      <PAMRasterBand band="1">
+        <Description>AOT at 0.55 micron</Description>
+      </PAMRasterBand>
+    </PAMDataset>
+  </Subdataset>
+</PAMDataset>
