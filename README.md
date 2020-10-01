@@ -47,6 +47,7 @@ Then clip the large one and only keep the cells within the smaller fishnet.
 
 These fishnets are stored under **Data/fishnet**. The large one is **Modeling_Grid** and the small one is **small_grid**. 
 
+
 * **Then do zonal statistics in order to resample all variables to the grid:**
 
 *Land_Cover*: 
